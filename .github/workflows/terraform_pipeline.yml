@@ -1,0 +1,100 @@
+name: Terraform setup, test, plan, and apply
+
+on:
+  pull_request:
+
+env:
+  TERRAFORM_VERSION: "1.9.2"
+  TERRAFORM_DIRECTORY: "static-website"
+  TF_IN_AUTOMATION: "True"
+  AWS_REGION: "eu-central-1"
+  AWS_ROLE_TO_ASSUME: "<add-aws-role-arn>"
+  AWS_ROLE_SESSION_NAME: "<add-aws-role-session-name>"
+
+permissions:
+  id-token: write
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  terraform_init_test:
+    runs-on: ubuntu-latest
+    if: github.event.review.state != 'approved'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get PR ID
+        id: pr-id
+        shell: bash
+        env:
+          GITHUB_REF: ${{ inputs.github_ref }}
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init and Test
+        uses: ./.github/test
+        with:
+          terraform_directory: ${{ env.TERRAFORM_DIRECTORY }}
+          root_directory: "."
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_id: ${{ steps.pr-id.outputs.PR_NUMBER }}
+          aws_role_to_assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws_role_session_name: ${{ env.AWS_ROLE_SESSION_NAME }}
+          aws_region: ${{ env.AWS_REGION }}
+
+  terraform_plan:
+    runs-on: ubuntu-latest
+    if: github.event.review.state != 'approved'
+    needs: terraform_init_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get PR ID
+        id: pr-id
+        shell: bash
+        env:
+          GITHUB_REF: ${{ inputs.github_ref }}
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init and Plan
+        uses: ./.github/plan
+        with:
+          terraform_directory: ${{ env.TERRAFORM_DIRECTORY }}
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_id: ${{ steps.pr-id.outputs.PR_NUMBER }}
+          aws_role_to_assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws_role_session_name: ${{ env.AWS_ROLE_SESSION_NAME }}
+          aws_region: ${{ env.AWS_REGION }}
+
+  terraform_apply:
+    runs-on: ubuntu-latest
+    if: github.event.review.state != 'approved'
+    needs: terraform_plan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get PR ID
+        id: pr-id
+        shell: bash
+        env:
+          GITHUB_REF: ${{ inputs.github_ref }}
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | awk 'BEGIN { FS = "/" } ; { print $3 }')
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init and Apply
+        uses: ./.github/apply
+        with:
+          terraform_directory: ${{ env.TERRAFORM_DIRECTORY }}
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          pr_id: ${{ steps.pr-id.outputs.PR_NUMBER }}
+          aws_role_to_assume: ${{ env.AWS_ROLE_TO_ASSUME }}
+          aws_role_session_name: ${{ env.AWS_ROLE_SESSION_NAME }}
+          aws_region: ${{ env.AWS_REGION }}

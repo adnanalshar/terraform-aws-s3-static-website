@@ -1,0 +1,102 @@
+name: 'Terraform setup and test'
+description: 'Sets up Terraform and tests the code'
+inputs:
+  terraform_directory:
+    description: 'Directory that holds Terraform code'
+    required: true
+  root_directory:
+    description: 'Root directory for fmt check'
+    required: true
+  terraform_version:
+    description: 'Terraform version'
+    required: true
+    default: 1.9.2
+  github_token: 
+    description: 'GitHub token for auth'
+    required: true
+  pr_id:
+    description: 'Pull request ID'
+    required: true
+  aws_role_to_assume:
+    description: 'AWS Role to assume'
+    required: true
+    default: <add-aws-role-arn>
+  aws_role_session_name:
+    description: 'AWS Role session name'
+    required: true
+    default: <add-aws-role-session-name>
+  aws_region:
+    description: 'AWS Region'
+    required: true
+    default: '<aws-region>'
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ inputs.terraform_version }}
+        terraform_wrapper: false
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: ${{ inputs.aws_role_to_assume }}
+        role-session-name: ${{ inputs.aws_role_session_name }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Terraform Init
+      id: init
+      working-directory: ${{ inputs.terraform_directory }}
+      shell: bash
+      run: |
+        terraform init
+
+    - name: Terraform fmt check
+      id: fmt
+      working-directory: ${{ inputs.root_directory }}
+      shell: bash
+      run: |
+        terraform fmt -check -diff -recursive ${{ inputs.root_directory }}
+
+    - name: Terraform Validate
+      id: validate
+      working-directory: ${{ inputs.terraform_directory }}
+      shell: bash
+      run: |
+        terraform validate
+
+    - name: Terraform Test (Terraform Test Framework)
+      id: tftest
+      working-directory: ${{ inputs.terraform_directory }}
+      shell: bash
+      run: |
+        terraform test -no-color 2>&1 | tee terraform_test.txt
+
+    - name: Terraform Test (Checkov)
+      id: checkov
+      uses: bridgecrewio/checkov-action@master
+      with:
+        directory: ${{ inputs.terraform_directory }}
+        framework: terraform
+        quiet: true
+        output_format: cli
+        output_file_path: checkov_results.sarif
+
+    - name: Concatenate Test Results Files
+      id: concatenate-files
+      shell: bash
+      run: |
+        echo "###################################" >> test_results.txt
+        echo "------ Terraform Test Framework Results -----" >> test_results.txt
+        cat ${{ inputs.terraform_directory }}/terraform_test.txt >> test_results.txt
+        echo "###################################" >> test_results.txt
+        echo "----- Checkov Results -----" >> test_results.txt
+        cat checkov_results.sarif/results_cli.txt >> test_results.txt
+
+    - name: Comment Test Results
+      id: comment-test-results
+      uses: thollander/actions-comment-pull-request@v2
+      with:
+        filePath: test_results.txt
